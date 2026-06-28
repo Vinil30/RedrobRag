@@ -1,0 +1,5 @@
+RAG/qdrant_d_b
+RAG/__pycache__
+.env
+Environment
+data/data2/candidates.jsonl
