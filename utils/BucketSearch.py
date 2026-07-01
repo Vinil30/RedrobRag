@@ -1,10 +1,6 @@
 from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
-import os
 from pathlib import Path
-from dotenv import load_dotenv
-
-load_dotenv()
 
 
 class BucketSearch:
@@ -16,26 +12,9 @@ class BucketSearch:
         )
 
         self.local_db_path = Path(__file__).resolve().parents[1] / "RAG" / "qdrant_d_b"
-        self.local_client = None
-        self.using_local = False
-
-        qdrant_url = os.getenv("QDRANT_URL") or os.getenv("QDRANT_URI")
-        qdrant_api_key = os.getenv("QDRANT_API_KEY")
-
-        if not qdrant_url:
-            raise ValueError("Missing QDRANT_URL in environment or .env file.")
-        if not qdrant_api_key:
-            raise ValueError("Missing QDRANT_API_KEY in environment or .env file.")
-
         self.client = QdrantClient(
-            url=qdrant_url,
-            api_key=qdrant_api_key
+            path=str(self.local_db_path)
         )
-
-    def _get_local_client(self):
-        if self.local_client is None:
-            self.local_client = QdrantClient(path=str(self.local_db_path))
-        return self.local_client
 
     def _query_points(
         self,
@@ -76,41 +55,21 @@ class BucketSearch:
                 points
             )
 
-        except Exception as remote_error:
-            if not self.using_local:
-                print(
-                    f"Remote Qdrant query failed ({remote_error}). "
-                    "Falling back to local Qdrant DB."
-                )
-                self.client = self._get_local_client()
-                self.using_local = True
+        except Exception:
+            local_collection_name = collection_name.lower()
+            if local_collection_name == collection_name:
+                raise
 
-            try:
-                points = run_query(
-                    self.client,
-                    collection_name,
-                    metadata_filter
-                )
-                return retry_without_filter_if_empty(
-                    self.client,
-                    collection_name,
-                    points
-                )
-            except Exception:
-                local_collection_name = collection_name.lower()
-                if local_collection_name == collection_name:
-                    raise
-
-                points = run_query(
-                    self.client,
-                    local_collection_name,
-                    metadata_filter
-                )
-                return retry_without_filter_if_empty(
-                    self.client,
-                    local_collection_name,
-                    points
-                )
+            points = run_query(
+                self.client,
+                local_collection_name,
+                metadata_filter
+            )
+            return retry_without_filter_if_empty(
+                self.client,
+                local_collection_name,
+                points
+            )
 
     def search_bucket(
         self,
@@ -119,7 +78,7 @@ class BucketSearch:
         collection_name,
         bucket_name,
         candidate_pool,
-        limit=2000
+        limit=1000
     ):
 
         for statement in bucket:
