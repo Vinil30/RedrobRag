@@ -38,50 +38,39 @@ class BucketGen:
 
         self.llm = ChatGroq(
             model="llama-3.3-70b-versatile",
-            temperature=0.9
+            temperature=0.1
         ).with_structured_output(StructuredOutput)
         self.schema_summary = """
-profile:
-- years_of_experience
+Qdrant metadata fields available for hard rejects:
+- candidate_id
+- years_experience
+- country
+- location
 - current_title
 - current_company
-- current_company_size
-- current_industry
-- location
-- country
-
-career_history:
-- company
-- title
-- duration_months
 - industry
-- description
-
-education:
-- institution
-- degree
-- field_of_study
-- tier
-
-skills:
-- name
-- proficiency
-- endorsements
-- duration_months
-
-redrob_signals:
-- open_to_work_flag
+- highest_degree
+- skills
+- open_to_work
 - notice_period_days
-- preferred_work_mode
 - willing_to_relocate
-- github_activity_score
-- recruiter_response_rate
+- preferred_work_mode
+- salary_min_lpa
+- salary_max_lpa
+- profile_completeness
+- response_rate
 - interview_completion_rate
 - offer_acceptance_rate
-- expected_salary_range_inr_lpa
-- profile_completeness_score
-- saved_by_recruiters_30d
-- search_appearance_30d
+- connection_count
+- applications_30d
+- profile_views_30d
+- verified_email
+- verified_phone
+
+Important value formats:
+- preferred_work_mode values are lowercase: remote, hybrid, onsite, flexible
+- boolean values are true or false
+- skills is a list of skill names
 """
         self.prompt = ChatPromptTemplate.from_messages([
             (
@@ -94,6 +83,15 @@ Your task is NOT to summarize the Job Description.
 Your task is to infer recruiter intent and generate semantic retrieval
 queries using the HyDE (Hypothetical Document Embedding) technique.
 
+CRITICAL GROUNDING RULE:
+Generate candidate descriptions only from evidence in the Job Description.
+Do NOT generalize from the job title.
+Do NOT use broad role-category assumptions.
+
+If the JD does not mention or clearly require a concept, do not generate
+candidate profiles around that concept.
+
+Avoid generic broad terms unless the JD explicitly supports them
 The generated output will power an AI hiring pipeline:
 
 1. Metadata Filtering
@@ -102,28 +100,59 @@ The generated output will power an AI hiring pipeline:
 4. Cross Encoder Re-ranking
 5. Final Ranking
 
-AVAILABLE CANDIDATE SCHEMA
+AVAILABLE QDRANT METADATA
 The generated personas MUST ONLY use information that
-can be represented by the candidate schema.
+can be represented by the candidate metadata.
 
-Use the schema fields to infer:
+Use the metadata fields to infer:
 
-• profile
-• career_history
+• experience
+• location
+• current role
+• industry
 • education
 • skills
-• redrob_signals
+• platform signals
 
-Do NOT invent fields outside the schema.
+Do NOT invent fields outside the metadata list.
 
 Descriptions should naturally correspond to values
-that may exist inside these schema fields.
+that may exist inside these metadata fields.
 
 ====================================================
-PART 1 : HARD REJECTS
+PART 1 : METADATA KEEP FILTERS
 ====================================================
 
-Extract ONLY explicit or strongly implied hard rejection conditions.
+The output field is named hard_rejects for compatibility with the
+pipeline, but its contents MUST be Qdrant KEEP filters.
+
+A KEEP filter describes candidates who should remain eligible for
+semantic retrieval.
+
+Do NOT describe rejected candidates.
+Do NOT output the negative/bad-candidate condition itself.
+
+If the JD says "reject candidates with less than 5 years experience",
+the correct KEEP filter is:
+
+{{
+    "lhs":"years_experience",
+    "operator":">=",
+    "rhs":5
+}}
+
+The wrong filter would be:
+
+{{
+    "lhs":"years_experience",
+    "operator":"<",
+    "rhs":5
+}}
+
+because that keeps the rejected candidates.
+
+Extract ONLY explicit or strongly implied eligibility conditions that can
+be safely applied before vector search.
 
 Represent every condition using
 
@@ -147,7 +176,7 @@ not_in
 Examples
 
 {{
-    "lhs":"years_of_experience",
+    "lhs":"years_experience",
     "operator":">=",
     "rhs":5
 }}
@@ -161,27 +190,51 @@ Examples
 {{
     "lhs":"preferred_work_mode",
     "operator":"in",
-    "rhs":["Remote","Hybrid"]
+    "rhs":["remote","hybrid"]
 }}
 
 {{
-    "lhs":"current_industry",
+    "lhs":"industry",
     "operator":"!=",
     "rhs":"Healthcare"
 }}
 
 Rules
 
-• Use ONLY metadata fields.
+• Every condition must KEEP eligible candidates, not identify rejected candidates.
+• For minimum requirements, use >=.
+• For maximum limits, use <=.
+• Use != or not_in only when the JD explicitly excludes a metadata value,
+such as "not from Healthcare".
+• Do NOT use != to express desired titles, desired industries, desired
+locations, or desired work modes.
+• Do NOT exact-match current_title unless the JD explicitly requires one
+exact title and rejects all others.
+• Do NOT exact-match location unless the JD explicitly rejects all other
+locations. Prefer country when the role is country-bound.
+• If a disqualifier cannot be represented by available metadata, do NOT
+create a filter for it. Let semantic retrieval handle it.
+• Use ONLY these exact metadata field names:
+candidate_id, years_experience, country, location, current_title,
+current_company, industry, highest_degree, skills, open_to_work,
+notice_period_days, willing_to_relocate, preferred_work_mode,
+salary_min_lpa, salary_max_lpa, profile_completeness, response_rate,
+interview_completion_rate, offer_acceptance_rate, connection_count,
+applications_30d, profile_views_30d, verified_email, verified_phone.
+• Do NOT use source schema names such as years_of_experience,
+current_industry, open_to_work_flag, recruiter_response_rate,
+profile_completeness_score, or expected_salary_range_inr_lpa.
+• For preferred_work_mode, always use lowercase values.
 • Never invent impossible metadata.
 • Never create unnecessary filters.
 • If a condition is only preferred, DO NOT include it here.
+• When uncertain, output fewer filters.
 
 ====================================================
 PART 2 : BUCKET 1
 ====================================================
 
-Generate 10-15 HyDE candidate descriptions.
+Generate 8-12 HyDE candidate descriptions.
 Each description MUST represent a DIFFERENT interpretation of the Job Description.
 These represent candidates recruiters would immediately shortlist.
 
@@ -212,7 +265,7 @@ Every statement should be semantically unique.
 PART 3 : BUCKET 2
 ====================================================
 
-Generate 10-15 HyDE candidate descriptions.
+Generate 8-12 HyDE candidate descriptions.
 
 These candidates are still strong.
 
@@ -224,7 +277,7 @@ These should retrieve candidates that recruiters would seriously consider.
 PART 4 : BUCKET 3
 ====================================================
 
-Generate 10-15 HyDE candidate descriptions.
+Generate EXACTLY 5 HyDE candidate descriptions.
 
 These candidates satisfy only minimum expectations.
 
@@ -234,7 +287,7 @@ They are weaker candidates but still worth retrieving.
 PART 5 : BUCKET 4
 ====================================================
 
-Generate 10-15 HyDE candidate descriptions describing candidates that
+Generate EXACTLY 5 HyDE candidate descriptions describing candidates that
 recruiters would actively avoid.
 
 Examples
@@ -341,7 +394,7 @@ Job Description
 
 {job_desc}
 
-Candidate Schema
+Qdrant Metadata
 
 {schema_summary}
 """
