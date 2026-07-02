@@ -68,6 +68,7 @@ class JDExtractor:
             text = self.extract_pdf_ocr(file_path)
 
         return text
+    
 
     def extract(self, file_path):
 
