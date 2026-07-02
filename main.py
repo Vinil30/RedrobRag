@@ -32,7 +32,12 @@ class PipelineOrchestrator:
         if not scores:
             return 0.0
 
-        return max(scores)
+        scores = sorted(scores, reverse=True)
+        max_score = scores[0]
+        top_scores = scores[:3]
+        average_top_3 = sum(top_scores) / len(top_scores)
+
+        return (0.6 * max_score) + (0.4 * average_top_3)
 
     def _keep_top_candidates(self, candidate_pool, limit=2000):
         scored_candidates = sorted(
@@ -140,7 +145,7 @@ class PipelineOrchestrator:
         before_prune = len(candidate_pool)
         candidate_pool = self._keep_top_candidates(
             candidate_pool,
-            limit=2000
+            limit=1000
         )
 
         if before_prune > len(candidate_pool):
@@ -164,9 +169,18 @@ class PipelineOrchestrator:
             ranked_candidates = self.final_scorer.score(
                 candidate_pool,
                 response.bucket_weights,
+                "top_500.csv"
+            )
+
+            top_100_candidate_pool = dict(ranked_candidates[:100])
+
+            ranked_candidates = self.final_scorer.score(
+                top_100_candidate_pool,
+                response.bucket_weights,
                 output_file
             )
             print(f"✓ Ranking complete. {len(ranked_candidates)} candidates ranked")
+            print(f"✓ Stage 2 results saved to: top_500.csv")
             print(f"✓ Results saved to: {output_file}")
         except Exception as e:
             print(f"✗ Failed to calculate final scores: {e}")
@@ -191,7 +205,7 @@ def main():
     JD_FILE =  r"C:\Users\VINIL\Documents\RedrobHackathon\data\data2\job_description.docx" # or .txt, .docx
     CANDIDATES_FILE = r"C:\Users\VINIL\Documents\RedrobHackathon\data\data2\candidates.jsonl"
     COLLECTION_NAME = "Candidates"  # Your Qdrant collection name
-    OUTPUT_FILE = "submission2.csv"
+    OUTPUT_FILE = "submission.csv"
     
     # Check if files exist
     if not os.path.exists(JD_FILE):
