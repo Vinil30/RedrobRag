@@ -1,9 +1,12 @@
 from .build_metadata_filter import MetadataFilter
 from .BucketSearch import BucketSearch
 
+def func():
+    pass
+
 class CandidateRetriever:
 
-    def __init__(self):
+    def __init__(self):      
 
         self.metadata_filter = MetadataFilter()
         self.bucket_search = BucketSearch()
