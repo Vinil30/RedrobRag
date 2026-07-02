@@ -21,6 +21,8 @@ class DescriptionLoader:
                 if candidate_id not in candidate_pool:
                     continue
 
+                candidate_pool[candidate_id]["raw_candidate"] = candidate
+
                 description_parts = []
 
                 profile = candidate.get("profile", {})
